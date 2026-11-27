@@ -754,6 +754,23 @@ class YAML:
         else:
             return list(*args)
 
+    def redact(self, data: Any, paths: Any) -> Any:
+        """redact values at the given occurrence *paths* in a round trip graph.
+
+        Only available for ``YAML(typ='rt')``.  The returned object graph is an
+        independent, still editable round trip copy in which every selected
+        value is replaced by the string ``[REDACTED]``; anchors, aliases, merge
+        (``<<``) relations and comments are preserved.  The input is not
+        modified.  A path is a non-empty sequence of str mapping keys and
+        non-negative int sequence indices.  Raises ValueError if any path
+        cannot be resolved; no partial result is returned in that case.
+        """
+        if 'rt' not in self.typ:
+            raise NotImplementedError('redact() is only supported for YAML(typ="rt")')
+        from ruamel.yaml.redact import redact as _redact
+
+        return _redact(data, paths)
+
     # helpers
     def official_plug_ins(self) -> Any:
         """search for list of subdirs that are plug-ins, if __file__ is not available, e.g.
