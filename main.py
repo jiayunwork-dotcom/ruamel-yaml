@@ -178,6 +178,10 @@ class YAML:
         self._version: Optional[Any] = None
         self.preserve_quotes: Optional[bool] = None
         self.allow_duplicate_keys = False  # duplicate keys in map, set
+        # optional: refuse documents whose alias/merge expanded form has more
+        # scalar occurrences than this.  None disables the check, otherwise a
+        # positive int.  See ruamel.yaml.expansion.
+        self._expansion_budget: Optional[int] = None
         self.encoding = 'utf-8'
         self.explicit_start: Union[bool, None] = None
         self.explicit_end: Union[bool, None] = None
@@ -530,6 +534,7 @@ class YAML:
                         selfx._parser = selfx._composer = selfx
                         self.Constructor.__init__(selfx, loader=selfx)
                         selfx.allow_duplicate_keys = self.allow_duplicate_keys
+                        selfx.expansion_budget = self.expansion_budget
                         rslvr.__init__(selfx, version=version, loadumper=selfx)
 
                 self._stream = stream
@@ -587,6 +592,12 @@ class YAML:
                 raise TypeError(
                     f'{x}.dump() in the context manager cannot have transform keyword',
                 )
+            if self.expansion_budget is not None:
+                # check before the context manager's serializer is opened, so
+                # a failing document cannot leave a partial "---" header behind
+                from ruamel.yaml.expansion import check_expansion
+
+                check_expansion(data, self.expansion_budget, 'dump')
             self._context_manager.dump(data)
         else:  # old style
             if stream is None:
@@ -598,6 +609,16 @@ class YAML:
     ) -> Any:
         if self._context_manager:
             raise NotImplementedError
+        if self.expansion_budget is not None:
+            # check every document before the first byte reaches the caller's
+            # stream: a budget failure must leave the stream completely
+            # untouched (and must not create/truncate an output path).
+            from ruamel.yaml.expansion import check_expansion
+
+            if not isinstance(documents, (list, tuple)):
+                documents = list(documents)
+            for data in documents:
+                check_expansion(data, self.expansion_budget, 'dump')
         self._output = stream
         self._context_manager = YAMLContextManager(self, transform=transform)
         for data in documents:
@@ -614,6 +635,13 @@ class YAML:
             # pathlib.Path() instance
             with stream.open('w') as fp:
                 return self.dump_all(documents, fp, transform=transform)
+        if self.expansion_budget is not None:
+            from ruamel.yaml.expansion import check_expansion
+
+            if not isinstance(documents, (list, tuple)):
+                documents = list(documents)
+            for data in documents:
+                check_expansion(data, self.expansion_budget, 'dump')
         # The stream should have the methods `write` and possibly `flush`.
         if self.top_level_colon_align is True:
             tlca: Any = max([len(str(x)) for x in documents[0]])
@@ -739,6 +767,7 @@ class YAML:
             tags=self.tags,
         )
         self._emitter = self._serializer = dumper
+        dumper.expansion_budget = self.expansion_budget
         return dumper, dumper, dumper
 
     # basic types
@@ -871,6 +900,25 @@ class YAML:
     @tags.setter
     def tags(self, val: Any) -> None:
         self._tags = val
+
+    @property
+    def expansion_budget(self) -> Optional[int]:
+        """the optional alias/merge expansion budget (positive int or None)
+
+        Every scalar occurrence of the effective (merge resolved, aliases
+        expanded per occurrence) document counts one; a document whose count
+        exceeds the budget raises
+        :class:`ruamel.yaml.error.ExpansionBudgetError` on both load and dump.
+        Assigning a non positive int or a bool raises ValueError.
+        """
+        return self._expansion_budget
+
+    @expansion_budget.setter
+    def expansion_budget(self, val: Optional[int]) -> None:
+        from ruamel.yaml.expansion import validate_budget
+
+        validate_budget(val)
+        self._expansion_budget = val
 
     @property
     def indent(self) -> Any:

@@ -119,6 +119,62 @@ When a duplicate key is found it and its value are discarded, as should
 be done according to the [YAML 1.1
 specification](http://yaml.org/spec/1.1/#id932806).
 
+### Limiting alias/merge expansion
+
+A small YAML document can use anchors/aliases and merge keys (`<<`) to
+describe a tree that is much larger than the document itself. This is
+fine for round-tripping (the aliases are written back), but a consumer
+that walks the *effective* data (every alias occurrence, with the merges
+resolved) can be made to traverse an enormous tree, e.g. a "billion
+laughs" document.
+
+If the data comes from an untrusted source you can set a positive
+integer expansion budget on the `YAML()` instance:
+
+--- !python |
+yaml = ruamel.yaml.YAML(typ='rt')
+yaml.expansion_budget = 10000
+try:
+    data = yaml.load(stream)
+except ruamel.yaml.error.ExpansionBudgetError as exc:
+    print(exc)  # "expansion budget of 10000 scalar occurrences exceeded on load"
+--- |
+The same check runs when dumping, before the representer produces any
+output, so a failing document does not write anything to the stream
+(and an over-budget alias graph cannot be turned into a huge file
+either).
+
+Counting rules of the *effective* data:
+
+* every scalar occurrence counts 1, whether it is a mapping key or a
+  mapping value, a sequence member, or a scalar inside a nested key;
+* containers themselves count 0, so an empty mapping or sequence counts 0;
+* the effective keys/values of a mapping are counted: the `<<` key and
+  its merge sources are not occurrences by themselves, own keys mask
+  inherited ones, and when several merge sources define a key the first
+  source in the `<<` list wins (the normal `ruamel.yaml` merge
+  priority). Values masked by an own key do not count;
+* the same sub graph reached through two different effective paths is
+  counted twice (they are two occurrences in the effective tree).
+
+If the effective keys/values or sequence members form a cycle, loading
+and dumping raise `ruamel.yaml.error.ExpansionCycleError` (the
+expansion is infinite). A cycle that only lives in a merge branch that
+is masked by an explicit value is not effective, and does not cause a
+rejection.
+
+The budget is per document (`load_all()`/`dump_all()` do not share the
+usage of one document with the next) and can be changed or disabled
+(`yaml.expansion_budget = None`) on an existing instance at any time.
+A failed check does not affect later use of the same instance.
+
+Choosing a value: every scalar of the largest legitimate document has
+to fit, including scalar values inherited through merges and aliases
+counted once per path. Counting is cheap and exact, see
+`ruamel.yaml.expansion.count_expansion(data)` for diagnostics. A
+budget does not prohibit aliases or merges: it only stops documents
+whose *effective* size is excessive.
+
 ## Dumping a multi-document YAML stream
 
 The \"normal\" `dump_all` expected as first element a list of documents,

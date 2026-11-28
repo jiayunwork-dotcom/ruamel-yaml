@@ -107,14 +107,28 @@ class BaseConstructor:
     def get_data(self) -> Any:
         # Construct and return the next document.
         if self.composer.check_node():
-            return self.construct_document(self.composer.get_node())
+            return self.check_expansion(self.construct_document(self.composer.get_node()))
 
     def get_single_data(self) -> Any:
         # Ensure that the stream contains a single document and construct it.
         node = self.composer.get_single_node()
         if node is not None:
-            return self.construct_document(node)
+            return self.check_expansion(self.construct_document(node))
         return None
+
+    def check_expansion(self, data: Any) -> Any:
+        """apply the optional alias/merge expansion budget of the owning YAML instance
+
+        The data is the just constructed, fully effective document (merges
+        resolved through ``CommentedMap``'s merge relation).  The check is per
+        document; nothing is retained for the next document.
+        """
+        budget = getattr(self.loader, 'expansion_budget', None)
+        if budget is not None:
+            from ruamel.yaml.expansion import check_expansion
+
+            check_expansion(data, budget, 'load')
+        return data
 
     def construct_document(self, node: Any) -> Any:
         data = self.construct_object(node)

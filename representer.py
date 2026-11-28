@@ -80,11 +80,31 @@ class BaseRepresenter:
             return self  # cyaml
 
     def represent(self, data: Any) -> None:
+        self.check_expansion(data)
         node = self.represent_data(data)
         self.serializer.serialize(node)
         self.represented_objects = {}
         self.object_keeper = []
         self.alias_key = None
+
+    def check_expansion(self, data: Any) -> None:
+        """apply the optional alias/merge expansion budget before emitting
+
+        The check runs on the effective view of *data* (aliases expanded per
+        occurrence, merge keys resolved), i.e. the very same facts the
+        constructor path checks after loading.  It runs before the document
+        nodes are built or any event for this document is emitted, so a
+        failing budget leaves the caller supplied stream untouched.
+        """
+        budget = getattr(self.dumper, 'expansion_budget', None)
+        if budget is None and not hasattr(self.dumper, 'typ'):
+            # the C(ython) dumper sets representer == serializer == dumper and
+            # therefore has no separate .dumper reference
+            budget = getattr(self, 'expansion_budget', None)
+        if budget is not None:
+            from ruamel.yaml.expansion import check_expansion
+
+            check_expansion(data, budget, 'dump')
 
     def represent_data(self, data: Any) -> Any:
         if self.ignore_aliases(data):

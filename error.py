@@ -18,6 +18,8 @@ __all__ = [
     'UnsafeLoaderWarning',
     'MarkedYAMLWarning',
     'MarkedYAMLFutureWarning',
+    'ExpansionBudgetError',
+    'ExpansionCycleError',
 ]
 
 
@@ -167,6 +169,43 @@ class MarkedYAMLError(YAMLError):
 
 class YAMLStreamError(Exception):
     pass
+
+
+class ExpansionError(YAMLError):
+    """base class for the optional expansion budget errors
+
+    The errors are not :class:`MarkedYAMLError` subclasses because on dump
+    there is no source mark.  They are still :class:`YAMLError` so existing
+    ``except YAMLError`` handlers keep working, and their message is stable
+    and easy to test for (``'expansion budget'`` resp. ``'expansion cycle'``).
+    """
+
+
+class ExpansionBudgetError(ExpansionError):
+    """the effective (alias/merge expanded) data uses more scalar occurrences
+    than the configured budget allows"""
+
+    def __init__(self, budget: Any, used: Any, where: Any = 'load') -> None:
+        self.budget = budget
+        self.used = used
+        self.where = where
+        super().__init__(
+            f'expansion budget of {budget} scalar occurrences exceeded on {where} '
+            f'(already counted {used}); the document expands too much through '
+            f'aliases and/or merge keys',
+        )
+
+
+class ExpansionCycleError(ExpansionError):
+    """the effective (alias/merge expanded) data contains a cycle"""
+
+    def __init__(self, where: Any = 'load', problem: Any = None) -> None:
+        self.where = where
+        self.problem = problem
+        msg = f'expansion cycle detected on {where}'
+        if problem:
+            msg += f': {problem}'
+        super().__init__(msg)
 
 
 class YAMLWarning(Warning):
